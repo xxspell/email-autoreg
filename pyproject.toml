@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "email-autoreg"
+version = "0.1.0"
+description = ""
+authors = ["hachimaru <74972395+xxspell@users.noreply.github.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+simplemail = "^1.0"
+bs4 = "^0.0.2"
+aiohttp = "^3.10.10"
+simplegmail = "^4.1.1"
+loguru = "^0.7.2"
+aiofiles = "^24.1.0"
+python-dotenv = "^1.0.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
