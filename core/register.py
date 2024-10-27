@@ -6,6 +6,7 @@ import aiohttp
 from aiohttp import ClientSession
 
 from core.captcha import find_ducks
+from core.env import SLOWED_MODE
 from core.mail.main import get_verification_code
 from core.utils.file import save_to_csv
 from core.utils.generator.nickname import generate_email
@@ -60,7 +61,7 @@ async def send_pixel(session: aiohttp.ClientSession, action: str, headers: dict,
                 xlogger.warning(f"Pixel request failed for action '{action}' with status {response.status}")
                 return False
     except aiohttp.ClientError as e:
-        xlogger.error(f"Error sending pixel request for action '{action}': {e}")
+        xlogger.warning(f"Error sending pixel request for action '{action}': {e}")
         return False
 
 
@@ -107,7 +108,7 @@ async def register_account(session: aiohttp.ClientSession, user: str, email: str
 
                     xlogger.debug(f"Attempt {attempt}/3 failed - Status: {response.status}, Response: {response_text}")
         except aiohttp.ClientError as e:
-            xlogger.error(f"Client error during registration for {email}: {e}")
+            xlogger.warning(f"Client error during registration for {email}: {e}")
 
         await asyncio.sleep(2)
 
@@ -118,18 +119,28 @@ async def register_account(session: aiohttp.ClientSession, user: str, email: str
 async def verify_account(session: ClientSession, user: str, otp: str, headers: dict, proxy: str) -> Optional[dict]:
     params = {'otp': otp, 'user': user}
     xlogger.debug(f"Verifying account for user: {user} with OTP: {otp}")
-    async with session.get(VERIFY_URL, params=params, headers=headers, proxy=proxy) as response:
-        if response.status == 200:
-            xlogger.debug(f"Account verified for user: {user}")
-            return await response.json()
-        else:
-            response_text = await response.text()
-            xlogger.warning(f"Verification failed for {user} - Status: {response.status}, Response: {response_text}")
-            return None
+
+    for attempt in range(1, 4):
+        try:
+            async with session.get(VERIFY_URL, params=params, headers=headers, proxy=proxy) as response:
+                if response.status == 200:
+                    xlogger.debug(f"Account verified for user: {user}")
+                    return await response.json()
+                else:
+                    response_text = await response.text()
+                    xlogger.warning(f"Verification failed for {user} - Status: {response.status}, Response: {response_text}")
+                    return None
+        except aiohttp.ClientError as e:
+            xlogger.warning(f"Client error during verfying for user: {user}")
+
+        await asyncio.sleep(2)
 
 
 async def create_account(session: ClientSession, domain: str, proxy: str, i: int) -> Optional[dict]:
     xlogger.log_prefix_var.set(f"Reg {i} | ")
+
+    if SLOWED_MODE:
+        await asyncio.sleep(generate_afk_seconds(45, 200))
     email, user = generate_email(domain)
 
     headers = HEADERS.copy()
