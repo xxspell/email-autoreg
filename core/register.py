@@ -8,8 +8,10 @@ from aiohttp import ClientSession
 from core.captcha import find_ducks
 from core.env import SLOWED_MODE
 from core.mail.main import get_verification_code
-from core.utils.file import save_to_csv
+from core.utils.file import save_to_csv, csv_to_txt
+from core.utils.generator.dots import dots_email_generator
 from core.utils.generator.nickname import generate_email
+from core.utils.generator.tags import tags_email_generator
 from core.utils.generator.useragent import generate_random_user_agent
 from core.utils.log import xlogger
 from core.utils.time import generate_afk_seconds
@@ -105,6 +107,7 @@ async def register_account(session: aiohttp.ClientSession, user: str, email: str
 
                     if '"error":"unavailable_username"' in response_text:
                         xlogger.warning(f"Username is busy")
+                        return None
 
                     xlogger.debug(f"Attempt {attempt}/3 failed - Status: {response.status}, Response: {response_text}")
         except aiohttp.ClientError as e:
@@ -128,7 +131,8 @@ async def verify_account(session: ClientSession, user: str, otp: str, headers: d
                     return await response.json()
                 else:
                     response_text = await response.text()
-                    xlogger.warning(f"Verification failed for {user} - Status: {response.status}, Response: {response_text}")
+                    xlogger.warning(
+                        f"Verification failed for {user} - Status: {response.status}, Response: {response_text}")
                     return None
         except aiohttp.ClientError as e:
             xlogger.warning(f"Client error during verfying for user: {user}")
@@ -136,12 +140,13 @@ async def verify_account(session: ClientSession, user: str, otp: str, headers: d
         await asyncio.sleep(2)
 
 
-async def create_account(session: ClientSession, domain: str, proxy: str, i: int) -> Optional[dict]:
+async def create_account(session: ClientSession, email: str, user: str, proxy: str, i: int) -> Optional[dict]:
     xlogger.log_prefix_var.set(f"Reg {i} | ")
 
     if SLOWED_MODE:
-        await asyncio.sleep(generate_afk_seconds(45, 200))
-    email, user = generate_email(domain)
+        sleep_slow_sec = generate_afk_seconds(45, 200)
+        xlogger.info(f"SLOWED_MODE = True. Sleeping for {sleep_slow_sec} seconds")
+        await asyncio.sleep(sleep_slow_sec)
 
     headers = HEADERS.copy()
     user_agent = generate_random_user_agent("windows", "chrome")
@@ -190,16 +195,37 @@ async def create_account(session: ClientSession, domain: str, proxy: str, i: int
     return None
 
 
-async def main(domain: str, num_accounts: int, max_connections: int, proxies: List[str]):
+async def main(mode_params: dict, num_accounts: int, max_connections: int, proxies: List[str], export):
+    if export:
+        xlogger.info(f"Export duck.com email from accounts.csv to {export}")
+        csv_to_txt(txt_file=export)
+        return
+
+    mode = mode_params["mode"]
+    if mode == "domain":
+        domain = mode_params["domain"]
+        email_generator = domain_email_generator(domain, num_accounts)
+
+    elif mode == "dots":
+        emails_file = mode_params["emails_file"]
+        email_generator = dots_email_generator(emails_file, num_accounts)
+
+    elif mode == "tags":
+        emails_file = mode_params["emails_file"]
+        email_generator = tags_email_generator(emails_file, num_accounts)
+
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
     async with aiohttp.ClientSession() as session:
         tasks = []
         success_count = 0
         failure_count = 0
         created_accounts = []
 
-        for i in range(num_accounts):
+        for i, (email, nickname) in enumerate(email_generator):
             proxy = random.choice(proxies)
-            task = create_account(session, domain, proxy, i + 1)
+            task = create_account(session, email, nickname, proxy, i + 1)
             tasks.append(task)
 
             if len(tasks) >= max_connections or i == num_accounts - 1:
@@ -213,3 +239,9 @@ async def main(domain: str, num_accounts: int, max_connections: int, proxies: Li
                 tasks.clear()
 
         xlogger.info(f"Account registration summary: {success_count} created, {failure_count} failed.")
+
+
+def domain_email_generator(domain: str, count: int):
+    for i in range(count):
+        email, nickname = generate_email(domain)
+        yield email, nickname
